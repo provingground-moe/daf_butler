@@ -54,11 +54,46 @@ class YamlFormatter(FileFormatter):
         The `~yaml.UnsafeLoader` is used when parsing the YAML file.
         """
         try:
-            with open(path, "r") as fd:
-                data = yaml.load(fd, Loader=yaml.UnsafeLoader)
+            with open(path, "rb") as fd:
+                data = self._fromBytes(fd.read())
         except FileNotFoundError:
             data = None
 
+        return data
+
+    def _fromBytes(self, inMemoryDataset, pytype=None):
+        """Read the bytes object as a python object.
+
+        Parameters
+        ----------
+        inMemoryDataset : `bytes`
+            Bytes object to unserialize.
+        pytype : `class`, optional
+            Not used by this implementation.
+
+        Returns
+        -------
+        data : `object`
+            Either data as Python object read from the pickled string, or None
+            if the string could not be read.
+        """
+        try:
+            data = yaml.load(inMemoryDataset, Loader=yaml.UnsafeLoader)
+        except yaml.YAMLError:
+            data = None
+        try:
+            data = data.exportAsDict()
+        except AttributeError:
+            # its either my mis-use of yaml or intended behaviour, but yaml
+            # returns an py object, a list or an dictionary. Later, however,
+            # FileFormatter assembles and checks if only one of objects
+            # components was requested. It does so by forcing assembly of the
+            # full object and then coercing one of its parts to a pytype. I
+            # didn't want to figure out what is involved in the assembly
+            # process but it seems as if it only wants an dict. Pickle,
+            # however, always gets back the object. There is short-cutting
+            # potential here I believe (but in fileformatter)
+            pass
         return data
 
     def _writeFile(self, inMemoryDataset, fileDescriptor):
@@ -82,7 +117,27 @@ class YamlFormatter(FileFormatter):
         with open(fileDescriptor.location.path, "w") as fd:
             if hasattr(inMemoryDataset, "_asdict"):
                 inMemoryDataset = inMemoryDataset._asdict()
-            yaml.dump(inMemoryDataset, stream=fd)
+            fd.write(self._toBytes(inMemoryDataset))
+
+    def _toBytes(self, inMemoryDataset):
+        """Write the in memory dataset to a bytestring.
+
+        Parameters
+        ----------
+        inMemoryDataset : `object`
+            Object to serialize
+
+        Returns
+        -------
+        data : `str`
+            YAML string encoded to bytes.
+
+        Raises
+        ------
+        Exception
+            The object could not be serialized.
+        """
+        return yaml.dump(inMemoryDataset)
 
     def _coerceType(self, inMemoryDataset, storageClass, pytype=None):
         """Coerce the supplied inMemoryDataset to type `pytype`.

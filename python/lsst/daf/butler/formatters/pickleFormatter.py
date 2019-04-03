@@ -55,7 +55,7 @@ class PickleFormatter(FileFormatter):
         """
         try:
             with open(path, "rb") as fd:
-                data = pickle.load(fd)
+                data = self._fromBytes(fd.read())
         except FileNotFoundError:
             data = None
 
@@ -77,4 +77,47 @@ class PickleFormatter(FileFormatter):
             The file could not be written.
         """
         with open(fileDescriptor.location.path, "wb") as fd:
-            pickle.dump(inMemoryDataset, fd, protocol=-1)
+            fd.write(self._toBytes(inMemoryDataset))
+
+    def _fromBytes(self, inMemoryDataset, pytype=None):
+        """Read the bytes object as a python object.
+
+        Parameters
+        ----------
+        pickledDataset : `bytes`
+            Bytes object to unserialize.
+        pytype : `class`, optional
+            Not used by this implementation.
+
+        Returns
+        -------
+        data : `object`
+            Either data as Python object read from the pickled string, or None
+            if the string could not be read.
+        """
+        try:
+            data = pickle.loads(inMemoryDataset)
+        except pickle.PicklingError:
+            data = None
+
+        return data
+
+    def _toBytes(self, inMemoryDataset):
+        """Write the in memory dataset to a bytestring.
+
+        Parameters
+        ----------
+        inMemoryDataset : `object`
+            Object to serialize
+
+        Returns
+        -------
+        data : `bytes`
+            Bytes object representing the pickled object.
+
+        Raises
+        ------
+        Exception
+            The object could not be pickled.
+        """
+        return pickle.dumps(inMemoryDataset, protocol=-1)

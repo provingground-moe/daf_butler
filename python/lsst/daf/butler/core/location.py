@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-__all__ = ("Location", "LocationFactory", "ButlerURI")
+__all__ = ("Location", "LocationFactory", "ButlerURI", "S3Location", "S3LocationFactory")
 
 import os
 import os.path
@@ -430,3 +430,134 @@ class LocationFactory:
         if os.path.isabs(path):
             raise ValueError("LocationFactory path must be relative to datastore, not absolute.")
         return Location(self._datastoreRootUri, path)
+
+
+class S3Location:
+    """Identifies a location in the `S3Datastore`.
+    """
+
+    __slots__ = ("_scheme", "_bucket", "_datastoreRoot", "_relpath")
+
+    def __init__(self, scheme, bucket, datastoreRoot, relpath, **kwargs):
+        # no risks, maximal sanitation
+        self._scheme = scheme + '://' if scheme[-3:] != '://' else scheme
+        self._bucket = bucket.strip('/') + '/'
+        self._datastoreRoot = datastoreRoot.strip('/') + '/'
+        self._relpath = relpath.lstrip('/')
+
+    def __str__(self):
+        return self.uri()
+
+    @property
+    def uri(self):
+        """URI corresponding to S3Location.
+        """
+        # uri.geturl will return only s3:/ not s3://
+        return self._scheme + os.path.join(self._bucket, self._datastoreRoot, self._relpath)
+
+    @property
+    def bucket(self):
+        """Return the bucketname of this S3Location.
+        """
+        # buckets are special because you only want their name, but
+        # path.join will not understand their relationship to rootDir
+        # without the ending /
+        return self._bucket.strip('/')
+
+    @property
+    def path(self):
+        """Path corresponding to S3Location.
+
+        This path includes the root of the `S3Datastore`.
+        """
+        return os.path.join(self._datastoreRoot, self._relpath)
+
+    @property
+    def pathInStore(self):
+        """Path corresponding to S3Location relative to `S3Datastore` root.
+        """
+        return self._relpath
+
+    def updateExtension(self, ext):
+        """Update the file extension associated with this `S3Location`.
+
+        Parameters
+        ----------
+        ext : `str`
+            New extension. If an empty string is given any extension will
+            be removed. If `None` is given there will be no change.
+        """
+        if ext is None:
+            return
+        path, _ = os.path.splitext(self._relpath)
+
+        # Ensure that we have a leading "." on file extension (and we do not
+        # try to modify the empty string)
+        if ext and not ext.startswith("."):
+            ext = "." + ext
+
+        self._relpath = path + ext
+
+
+class S3LocationFactory:
+    """Factory for `S3Location` instances.
+    """
+
+    def __init__(self, bucket, datastoreRoot):
+        """Constructor
+
+        Parameters
+        ----------
+        bucket : `str`
+            Name of the Bucket that is used.
+        datastoreRoot : `str`
+            Root location of the `S3Datastore` in the Bucket.
+        """
+        # no chances, maximal sanitation
+        self._bucket = bucket.strip('/')
+        self._datastoreRoot = datastoreRoot.strip('/')
+
+    def fromUri(self, uri):
+        """Factory function to create a `S3Location` from a URI.
+
+        Parameters
+        ----------
+        uri : `str`
+            A valid Universal Resource Identifier.
+
+        Returns
+        -------
+        location : `S3Location`
+            The equivalent `S3Location`.
+        """
+        if uri is None or not isinstance(uri, str):
+            raise ValueError("URI must be a string and not {}".format(uri))
+
+        parsed = urllib.parse.urlparse(uri)
+        scheme = parsed.scheme
+        bucketname = parsed.netloc
+        relpath = parsed.path.lstrip('/')
+        dirs = relpath.split('/')
+        root = dirs[0]
+        relpath = os.path.join(*dirs[1:])
+
+        return S3Location(scheme, bucketname, root, relpath)
+
+    def fromPath(self, path):
+        """Factory function to create a `S3Location` from a POSIX-like path.
+
+        Parameters
+        ----------
+        path : `str`
+            A POSIX-like path, relative to the `S3Datastore` root.
+
+        Returns
+        -------
+        location : `S3Location`
+            The equivalent `S3Location`.
+        """
+        if os.path.isabs(path):
+            raise ValueError(('A path whose absolute location is in an S3 bucket '
+                             'can not have an absolute path: {}').format(path))
+
+        return self.fromUri('s3://' + os.path.join(self._bucket, self._datastoreRoot, path))

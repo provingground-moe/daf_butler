@@ -30,8 +30,14 @@ import contextlib
 import logging
 import itertools
 
+try:
+    import boto3
+except ImportError:
+    boto3 = None
+
 from lsst.utils import doImport
 from .core.utils import transactional
+from .core.s3utils import parsePathToUriElements
 from .core.datasets import DatasetRef, DatasetType
 from .core.datastore import Datastore
 from .core.registry import Registry
@@ -173,9 +179,19 @@ class Butler:
         """
         if isinstance(config, (ButlerConfig, ConfigSubset)):
             raise ValueError("makeRepo must be passed a regular Config without defaults applied.")
-        root = os.path.abspath(root)
-        if not os.path.isdir(root):
-            safeMakeDir(root)
+
+        scheme, rootpath, relpath = parsePathToUriElements(root)
+        if scheme == 'file://':
+            root = os.path.abspath(root)
+            if not os.path.isdir(root):
+                safeMakeDir(root)
+        elif scheme == 's3://':
+            if boto3 is None:
+                raise ModuleNotFoundError(("Could not find boto3. "
+                                           "Are you sure it is installed?"))
+            s3 = boto3.resource('s3')
+            bucket = s3.Bucket(rootpath)
+            bucket.put_object(Bucket=rootpath, Key=(relpath))
         config = Config(config)
 
         # If we are creating a new repo from scratch with relative roots,
@@ -191,14 +207,10 @@ class Butler:
         if standalone:
             config.merge(full)
 
-        # Write out the config
-        if outfile is not None:
-            # Force root so that we can find everything else
-            config["root"] = root
-        else:
-            outfile = os.path.join(root, "butler.yaml")
-        config.dumpToFile(outfile)
-
+        if scheme == 'file://':
+            config.dumpToFile(os.path.join(root, "butler.yaml"))
+        elif scheme == 's3://':
+            config.dumpToS3(rootpath, os.path.join(relpath, 'butler.yaml'))
         # Create Registry and populate tables
         registryClass.fromConfig(config, create=createRegistry, butlerRoot=root)
         return config

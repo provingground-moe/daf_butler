@@ -27,6 +27,7 @@ __all__ = ("ButlerConfig",)
 
 import os.path
 
+from .s3utils import parsePathToUriElements
 from .config import Config
 from .datastore import DatastoreConfig
 from .schema import SchemaConfig
@@ -75,8 +76,13 @@ class ButlerConfig(Config):
             self.configDir = other.configDir
             return
 
-        if isinstance(other, str) and os.path.isdir(other):
-            other = os.path.join(other, "butler.yaml")
+        if isinstance(other, str):
+            if other.startswith('s3://') and not other.endswith('.yaml'):
+                scheme, root, relpath = parsePathToUriElements(other)
+                other = scheme + os.path.join(root, relpath, "butler.yaml")
+            else:
+                if os.path.isdir(other):
+                    other = os.path.join(other, "butler.yaml")
 
         # Create an empty config for us to populate
         super().__init__()
